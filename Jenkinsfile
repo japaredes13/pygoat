@@ -11,7 +11,7 @@ pipeline {
             steps {
                 echo '=== Clonando Pygoat ==='
                 git branch: 'master',
-                    url: 'https://github.com/adeyosemanputra/pygoat.git'
+                    url: 'https://github.com/japaredes13/pygoat.git'
             }
         }
         
