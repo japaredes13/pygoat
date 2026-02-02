@@ -1,82 +1,53 @@
 pipeline {
     agent any
-    
+
     environment {
-        VENV_DIR = 'venv'
-        REPORTS_DIR = 'security-reports'
+        BANDIT_FILE = "bandit.json"
     }
-    
+
     stages {
-        stage('Checkout') {
-            steps {
-                echo '=== Clonando Pygoat ==='
-                git branch: 'master',
-                    url: 'https://github.com/japaredes13/pygoat.git'
+        stage('SAST-Bandit') {
+            agent {
+                docker {
+                    image 'python:3.11-slim'
+                    reuseNode true
+                    args "-u root"
+                }
             }
-        }
-        
-        stage('Setup Python') {
             steps {
-                echo '=== Configurando entorno Python ==='
-                sh '''
-                    python3 --version
-                    python3 -m venv ${VENV_DIR}
-                    . ${VENV_DIR}/bin/activate
-                    pip install --upgrade pip
-                    pip install bandit
-                    bandit --version
-                '''
-            }
-        }
-        
-        stage('SAST - Bandit') {
-            steps {
-                echo '=== Ejecutando análisis SAST ==='
-                sh '''
-                    mkdir -p ${REPORTS_DIR}
-                    . ${VENV_DIR}/bin/activate
-                    
-                    # Análisis completo
-                    bandit -r . -ll -f json -o ${REPORTS_DIR}/bandit-report.json || true
-                    bandit -r . -ll -f html -o ${REPORTS_DIR}/bandit-report.html || true
-                    bandit -r . -ll -f txt -o ${REPORTS_DIR}/bandit-report.txt || true
-                    
-                    # Mostrar en consola
-                    echo "=== RESUMEN DE VULNERABILIDADES ==="
-                    cat ${REPORTS_DIR}/bandit-report.txt
-                '''
-            }
-        }
-        
-        stage('Archive Reports') {
-            steps {
-                echo '=== Archivando reportes ==='
-                
-                archiveArtifacts artifacts: "${REPORTS_DIR}/**/*",
-                                 fingerprint: true
-                
-                publishHTML(target: [
-                    allowMissing: false,
-                    alwaysLinkToLastBuild: true,
-                    keepAll: true,
-                    reportDir: "${REPORTS_DIR}",
-                    reportFiles: 'bandit-report.html',
-                    reportName: 'Bandit SAST Report'
-                ])
+                script {
+                    sh '''
+                        apt-get update -qq
+                        apt-get install -qq -y git
+                        git config --global --add safe.directory $(pwd)
+                        pip install -q bandit
+                    '''
+
+                    try {
+                        // Escaneo SAST con Bandit para PyGoat
+                        sh "bandit -r . -f json -o ${BANDIT_FILE} || true"
+                        sh "ls -lah ${WORKSPACE}"
+                    } catch (err) {
+                        unstable("Bandit encontró vulnerabilidades")
+                    }
+                }
             }
         }
     }
-    
+
     post {
-        always {
-            echo '=== Limpieza ==='
-            sh "rm -rf ${VENV_DIR}"
-        }
+
         success {
-            echo '✅ Pipeline completado'
+            echo "✅ SAST Bandit finalizó correctamente (sin errores de ejecución)"
         }
+
         failure {
-            echo '❌ Pipeline falló'
+            echo "❌ Falló el stage SAST Bandit (error de ejecución)"
+        }
+
+        always {
+            echo "📦 Archivando reporte Bandit"
+            archiveArtifacts artifacts: 'bandit.json', fingerprint: true, allowEmptyArchive: false
         }
     }
 }
